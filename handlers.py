@@ -12,14 +12,12 @@ import time
 __version__ = '0.1'
 
 class RangedHTTPRequestHandler(SimpleHTTPRequestHandler):
-    '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.
-    '''
+    '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.'''
 
     server_version = 'RangedHTTP/' + __version__
 
     def send_head(self):
-        '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.
-        '''
+        '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.'''
         path = self.translate_path(self.path)
         f = None
         if os.path.isdir(path):
