@@ -15,6 +15,7 @@ class RangedHTTPRequestHandler(SimpleHTTPRequestHandler):
     '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.'''
 
     server_version = 'RangedHTTP/' + __version__
+    protocol_version = 'HTTP/1.1'
 
     def send_head(self):
         '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.'''
@@ -90,6 +91,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
     '''A HTTP proxy request handler.'''
 
     server_version = 'ProxyHTTP/' + __version__
+    protocol_version = 'HTTP/1.1'
 
     def do_HEAD(self):
         '''Serve a HEAD request.'''
