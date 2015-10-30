@@ -7,15 +7,21 @@ def run_server(server_class, handler_class, port):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     print('Servering HTTP on port {0}'.format(port))
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nKeyboard interrupt received, exiting.")
+        httpd.server_close()
+        sys.exit(0)
 
 if __name__ == '__main__':
     from servers import ThreadingHTTPServer, ForkingHTTPServer
     from handlers import RangedHTTPRequestHandler, ProxyHTTPRequestHandler
-    if len(sys.argv) == 2:
+    port = 8000
+    handler_class = RangedHTTPRequestHandler
+    if len(sys.argv) >= 2:
         port = int(sys.argv[1])
-    else:
-        port  = 8000
-    # run_server(ThreadingHTTPServer, RangedHTTPRequestHandler, port)
-    run_server(ThreadingHTTPServer, ProxyHTTPRequestHandler, port)
+    if len(sys.argv) >= 3:
+        handler_class = eval(sys.argv[2])
+    run_server(ThreadingHTTPServer, handler_class, port)
 

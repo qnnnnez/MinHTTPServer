@@ -97,48 +97,49 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
         '''Serve a HEAD request.'''
         self.authorize()
         request = urllib.request.Request(self.path, headers=self.headers, method='HEAD')
+        request.headers['Connection'] = 'close'
         try:
             response = urllib.request.urlopen(request)
         except urllib.error.HTTPError as error:
             self.send_error(error.code, error.reason)
             return
-        self.send_response(response.status)
-        for key, value in response.headers.items():
-            self.send_header(key, value)
-        self.end_headers()
-        response.close()
+        try:
+            self.send_response(response.status)
+            for key, value in response.headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+        finally:
+            response.close()
 
     def do_GET(self):
         '''Serve a GET request.'''
         self.authorize()
         request = urllib.request.Request(self.path, headers=self.headers, method='GET')
+        request.headers['Connection'] = 'close'
         try:
             response = urllib.request.urlopen(request)
         except urllib.error.HTTPError as error:
             self.send_error(error.code, error.reason)
             return
-        self.send_response(response.status)
-        for key, value in response.headers.items():
-            self.send_header(key, value)
-        self.end_headers()
-        shutil.copyfileobj(response, self.wfile)
-        response.close()
+        try:
+            self.transfer(response)
+        finally:
+            response.close()
 
     def do_POST(self):
         '''Serve a POST request.'''
         self.authorize()
+        request = urllib.request.Request(self.path, headers=self.headers, method='POST', data=self.rfile.read())
+        request.headers['Connection'] = 'close'
         try:
-           request = urllib.request.Request(self.path, headers=self.headers, method='POST', data=self.rfile.read())
+            response = urllib.request.urlopen(request)
         except urllib.error.HTTPError as error:
             self.send_error(error.code, error.reason)
             return
-        response = urllib.request.urlopen(request)
-        self.send_response(response.status)
-        for key, value in response.headers.items():
-            self.send_header(key, value)
-        self.end_headers()
-        shutil.copyfileobj(response, self.wfile)
-        response.close()
+        try:
+            self.transfer(response)
+        finally:
+            response.close()
 
     def do_CONNECT(self):
         '''Serve a CONNECT request.'''
@@ -167,8 +168,63 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
             except BlockingIOError:
                 time.sleep(0.01)
         sock.close()
+        self.close_connection = True
         
-
     def authorize(self):
         pass
+
+    def chunked_transfer(self, response):
+        '''Transfer data in chunked encoding.
+        This is necessary when Connection: keep-alive is set but we cannot get Content-Length.
+        Following are from RFC 2616, section 3.6.1
+
+        Chunked-Body   = *chunk
+                         last-chunk
+                         trailer
+                         CRLF
+
+        chunk          = chunk-size [ chunk-extension ] CRLF
+                         chunk-data CRLF
+        chunk-size     = 1*HEX
+        last-chunk     = 1*("0") [ chunk-extension ] CRLF
+
+        chunk-extension= *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
+        chunk-ext-name = token
+        chunk-ext-val  = token | quoted-string
+        chunk-data     = chunk-size(OCTET)
+        trailer        = *(entity-header CRLF)
+        '''
+
+        self.send_response(response.status)
+        for key, value in response.headers.items():
+            self.send_header(key, value)
+        self.send_header('Transfer-Encoding', 'chunked')
+        self.end_headers()
+        while True:
+            buf = response.read(4096)
+            if not buf:
+                break
+            # chunk-size
+            self.wfile.write('{:x}'.format(len(buf)).encode())
+            self.wfile.write(b'\r\n')
+            # chunk-data
+            self.wfile.write(buf)
+            self.wfile.write(b'\r\n')
+        # last-chunk
+        self.wfile.write(b'0\r\n')
+        # end of the Chunked-Body
+        self.wfile.write(b'\r\n')
+
+    def transfer(self, response):
+        '''Send data to client.'''
+        if 'Content-Length' not in response.headers and self.headers.get('Connection').lower() == 'keep-alive':
+             self.chunked_transfer(response)
+             return
+        self.send_response(response.status)
+        for key, value in response.headers.items():
+            self.send_header(key, value)
+        self.end_headers()
+        shutil.copyfileobj(response, self.wfile)
+
+        
         
