@@ -9,6 +9,7 @@ import shutil
 import socket
 import time
 import copy
+from rangedfile import RangedFile
 from chunkedfile import ChunkedWriter
 
 __version__ = '0.1'
@@ -72,22 +73,16 @@ class RangedHTTPRequestHandler(SimpleHTTPRequestHandler):
             f.close()
             raise
 
-    def copyfile(self, source, outputfile):
-        '''Same as super().copyfile, but send partial file if Range is in request headers.
-        '''
-        if 'Range' not in self.headers:
-            super().copyfile(source, outputfile)
-            return
-        rstart, rend = self.headers['Range'].split('=')[-1].split('-')
-        rstart = 0 if rstart == '' else int(rstart)
-        source.seek(rstart)
-        if rend == '':
-            super().copyfile(source, outputfile)
-            return
-        rend = int(rend)
-        while source.tell() < rend:
-            data = source.read(min(1024, rend - source.tell()))
-            outputfile.write(data)
+    def copyfile(self, source, output_file):
+        '''Same as super().copyfile, but send partial file if Range is in request headers.'''
+        if 'Range' in self.headers:
+            rstart, rend = self.headers['Range'].split('=')[-1].split('-')
+            rstart = 0 if rstart == '' else int(rstart)
+            rend = float('inf') if rend == '' else int(rend)
+            input_file = RangedFile(source, rstart, rend)
+        else:
+            input_file = source
+        super().copyfile(input_file, output_file)
 
 class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
     '''A HTTP proxy request handler.'''
