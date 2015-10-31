@@ -9,7 +9,7 @@ import shutil
 import socket
 import time
 import copy
-from chunked import ChunkedWriter
+from chunkedfile import ChunkedWriter
 
 __version__ = '0.1'
 
