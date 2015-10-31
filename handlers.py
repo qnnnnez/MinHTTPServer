@@ -1,4 +1,3 @@
-from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 from http import HTTPStatus
 import urllib.parse
 import urllib.request
@@ -9,6 +8,7 @@ import shutil
 import socket
 import time
 import copy
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 from rangedfile import RangedFile
 from chunkedfile import ChunkedWriter
 
@@ -92,7 +92,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         '''Serve a HEAD request.'''
-        self.authorize()
+        if not self.authorize(): return
         request = urllib.request.Request(self.path, headers=self.headers, method='HEAD')
         request.headers['Connection'] = 'close'
         try:
@@ -110,7 +110,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         '''Serve a GET request.'''
-        self.authorize()
+        if not self.authorize(): return
         request = urllib.request.Request(self.path, headers=self.headers, method='GET')
         try:
             response = urllib.request.urlopen(request)
@@ -124,7 +124,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         '''Serve a POST request.'''
-        self.authorize()
+        if not self.authorize(): return
         request = urllib.request.Request(self.path, headers=self.headers, method='POST', data=self.rfile.read())
         try:
             response = urllib.request.urlopen(request)
@@ -138,7 +138,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_CONNECT(self):
         '''Serve a CONNECT request.'''
-        self.authorize()
+        if not self.authorize(): return
         host, port = self.path.split(':')
         port = int(port)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -166,7 +166,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         
     def authorize(self):
-        pass
+        return True
 
     def transfer(self, response):
         '''Send data to client.'''
