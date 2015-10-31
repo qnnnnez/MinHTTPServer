@@ -8,6 +8,8 @@ import os
 import shutil
 import socket
 import time
+import copy
+from chunked import ChunkedWriter
 
 __version__ = '0.1'
 
@@ -115,7 +117,6 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
         '''Serve a GET request.'''
         self.authorize()
         request = urllib.request.Request(self.path, headers=self.headers, method='GET')
-        request.headers['Connection'] = 'close'
         try:
             response = urllib.request.urlopen(request)
         except urllib.error.HTTPError as error:
@@ -130,7 +131,6 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
         '''Serve a POST request.'''
         self.authorize()
         request = urllib.request.Request(self.path, headers=self.headers, method='POST', data=self.rfile.read())
-        request.headers['Connection'] = 'close'
         try:
             response = urllib.request.urlopen(request)
         except urllib.error.HTTPError as error:
@@ -173,58 +173,22 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
     def authorize(self):
         pass
 
-    def chunked_transfer(self, response):
-        '''Transfer data in chunked encoding.
-        This is necessary when Connection: keep-alive is set but we cannot get Content-Length.
-        Following are from RFC 2616, section 3.6.1
-
-        Chunked-Body   = *chunk
-                         last-chunk
-                         trailer
-                         CRLF
-
-        chunk          = chunk-size [ chunk-extension ] CRLF
-                         chunk-data CRLF
-        chunk-size     = 1*HEX
-        last-chunk     = 1*("0") [ chunk-extension ] CRLF
-
-        chunk-extension= *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
-        chunk-ext-name = token
-        chunk-ext-val  = token | quoted-string
-        chunk-data     = chunk-size(OCTET)
-        trailer        = *(entity-header CRLF)
-        '''
-
-        self.send_response(response.status)
-        for key, value in response.headers.items():
-            self.send_header(key, value)
-        self.send_header('Transfer-Encoding', 'chunked')
-        self.end_headers()
-        while True:
-            buf = response.read(4096)
-            if not buf:
-                break
-            # chunk-size
-            self.wfile.write('{:x}'.format(len(buf)).encode())
-            self.wfile.write(b'\r\n')
-            # chunk-data
-            self.wfile.write(buf)
-            self.wfile.write(b'\r\n')
-        # last-chunk
-        self.wfile.write(b'0\r\n')
-        # end of the Chunked-Body
-        self.wfile.write(b'\r\n')
-
     def transfer(self, response):
         '''Send data to client.'''
-        if 'Content-Length' not in response.headers and self.headers.get('Connection').lower() == 'keep-alive':
-             self.chunked_transfer(response)
-             return
         self.send_response(response.status)
-        for key, value in response.headers.items():
+        headers = copy.deepcopy(response.headers)
+        del headers['Transfer-Encoding']
+        del headers['Connection']
+        for key, value in headers.items():
             self.send_header(key, value)
-        self.end_headers()
-        shutil.copyfileobj(response, self.wfile)
-
-        
+        if 'Content-Length' not in response.headers and self.headers.get('Connection').lower() == 'keep-alive':
+            outfile = ChunkedWriter(self.wfile, -1)
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            shutil.copyfileobj(response, outfile)
+            outfile.end_file()
+        else:
+            outfile = self.wfile
+            self.end_headers()
+            shutil.copyfileobj(response, self.wfile)
         
