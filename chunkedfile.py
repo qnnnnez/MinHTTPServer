@@ -48,10 +48,11 @@ class ChunkedWriter(object):
         self.bufsize = bufsize
         self.buffer = BytesIO()
         self.closed = False
+        self.ended = False
 
     def write(self, data, flush=False):
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
+        if self.closed or self.ended:
+            raise ValueError('Operation is not allowed.')
         if self.bufsize <= 0:
             self.write_chunk(data)
         else:
@@ -61,10 +62,13 @@ class ChunkedWriter(object):
         return len(data)
 
     def write_chunk(self, data):
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
+        if self.closed or self.ended:
+            raise ValueError('Operation is not allowed.')
+        if not data:
+            return
         # chunk-size
-        self.fileobj.write('{:x}'.format(len(data)).encode('ascii'))
+        self.fileobj.write('{:x}'.format(len(data)).encode(
+            'latin-1', 'strict'))
         self.fileobj.write(b'\r\n')
         # chunk-data
         self.fileobj.write(data)
@@ -72,7 +76,7 @@ class ChunkedWriter(object):
 
     def flush(self):
         if self.closed:
-            raise ValueError('I/O operation on closed file.')
+            raise ValueError('Operation is not allowed.')
         buffered = self.buffer.tell()
         if buffered == 0: return
         self.buffer.seek(0)
@@ -82,15 +86,20 @@ class ChunkedWriter(object):
 
     def end_file(self):
         if self.closed:
-            raise ValueError('I/O operation on closed file.')
+            raise ValueError('Operation is not allowed.')
         self.flush()
         # last-chunk
         self.fileobj.write(b'0\r\n')
         # end of Chunked-Body
         self.fileobj.write(b'\r\n')
-        self.close()
+        self.ended = True
 
     def close(self):
+        if self.closed:
+            return
+        if not self.ended:
+            self.end_file()
+        delattr(self, 'fileobj')
         self.closed = True
 
 class ChunkedReader(object):
