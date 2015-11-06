@@ -1,6 +1,8 @@
 from http import HTTPStatus
 import urllib.parse
 import urllib.request
+import sys
+import io
 import random
 import math
 import os
@@ -9,6 +11,7 @@ import socket
 import time
 import copy
 import gzip
+import html
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 from rangedfile import RangedFile
 from chunkedfile import ChunkedWriter
@@ -36,11 +39,11 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             super().send_header(keyword, value)
 
     def end_headers(self):
-        '''Create file objects and send extra HTTP headers.
-        After this you should use self.outfile instead of self.wfile
+        '''Send extra HTTP headers.
+        If you want to send response body as well, you are supposed to use self.start_body() and self.end_body().
         '''
-        using_gzip = False
-        using_chunked = False
+        self.using_gzip = False
+        self.using_chunked = False
         self.outfile = self.wfile
 
         if 'Accept-Encoding' in self.headers:
@@ -48,7 +51,7 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             encodings = [encoding.strip() for encoding in encodings]
             if 'gzip' in encodings:
                 self.send_header('Content-Encoding', 'gzip')
-                using_gzip = True
+                self.using_gzip = True
             elif 'deflate' in encodings:
                 # unusual
                 pass
@@ -59,77 +62,66 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'keep-alive')
 
         # when using gzip, we cannot determine transfer length even if content length is known.
-        if self._content_length and not using_gzip:
+        if self._content_length and not self.using_gzip:
             # Content-Length will be catch by self.send_header
             super().send_header('Content-Length', self._content_length)
 
-        if using_gzip or not self._content_length:
+        if self.using_gzip or not self._content_length:
             # transfer length unknown.
             self.send_header('Transfer-Encoding', 'chunked')
-            using_chunked = True
+            self.using_chunked = True
 
         super().end_headers()
-        if using_chunked:
+        delattr(self, '_content_length')
+
+    def just_end_headers(self):
+        '''Just end headers, doing nothing else.'''
+        if self._content_length:
+            super().send_header('Content-Length', self._content_length)
+        super().end_headers()
+        delattr(self, '_content_length')
+
+    def start_body(self):
+        '''Create self.outfile, which replaces self.wfile'''
+        if self.using_chunked:
             self.outfile = self.chunked_file = ChunkedWriter(
                     self.outfile, -1)
         else:
             self.chunked_file = None
-        if using_gzip:
+        if self.using_gzip:
             self.outfile = self.gzip_file = gzip.GzipFile(
                     fileobj=self.outfile, mode='wb')
         else:
             self.gzip_file = None
 
-    def handle_one_request(self):
-        '''Copied from BaseHTTPRequestHandler.Just do some cleaning.'''
-        try:
-            self.raw_requestline = self.rfile.readline(65537)
-            if len(self.raw_requestline) > 65536:
-                self.requestline = ''
-                self.request_version = ''
-                self.command = ''
-                self.send_error(HTTPStatus.REQUEST_URI_TOO_LONG)
-                return
-            if not self.raw_requestline:
-                self.close_connection = True
-                return
-            if not self.parse_request():
-                # An error code has been sent, just exit
-                return
-            mname = 'do_' + self.command
-            if not hasattr(self, mname):
-                self.send_error(
-                    HTTPStatus.NOT_IMPLEMENTED,
-                    "Unsupported method (%r)" % self.command)
-                return
-            method = getattr(self, mname)
-            method()
-            if self.gzip_file:
-                self.gzip_file.flush()
-                self.gzip_file.close()
-            if self.chunked_file:
-                self.chunked_file.end_file()
-            self.wfile.flush() #actually send the response if not already done.
-        except socket.timeout as e:
-            #a read or a write timed out.  Discard this connection
-            self.log_error("Request timed out: %r", e)
-            self.close_connection = True
-            return
+    def end_body(self):
+        '''Do some clean up works.'''
+        self.outfile.flush()
+        if self.gzip_file:
+            self.gzip_file.flush()
+            self.gzip_file.close()
+        if self.chunked_file:
+            self.chunked_file.end_file()
+        self.gzip_file = self.chunked_file = None
 
-class RangedHTTPRequestHandler(MinHTTPRequestHandler, SimpleHTTPRequestHandler):
+
+class FileHTTPRequestHandler(MinHTTPRequestHandler, SimpleHTTPRequestHandler):
     '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.'''
 
-    server_version = 'RangedHTTP/' + __version__
+    server_version = 'FileHTTP/' + __version__
     protocol_version = 'HTTP/1.1'
 
     def do_GET(self):
         '''Same as SimpleHTTPRequestHandler, but we use self.outfile instead of self.wfile.'''
         f = self.send_head()
         if f:
+            self.start_body()
             try:
-                self.copyfile(f, self.outfile)
+                self.send_file(f)
             finally:
                 f.close()
+                self.end_body()
+                
 
     def send_head(self):
         '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.'''
@@ -161,18 +153,24 @@ class RangedHTTPRequestHandler(MinHTTPRequestHandler, SimpleHTTPRequestHandler):
             return None
         try:
             if 'Range' not in self.headers:
+                fs = os.fstat(f.fileno())
+                if 'If-Modified-Since' in self.headers:
+                    if self.headers['If-Modified-Since'] == self.date_time_string(fs.st_mtime):
+                        self.send_response(HTTPStatus.NOT_MODIFIED)
+                        self.end_headers()
+                        f.close()
+                        return None
                 self.send_response(HTTPStatus.OK)
                 self.send_header('Content-type', ctype)
-                fs = os.fstat(f.fileno())
                 self.send_header('Content-Length', str(fs[6]))
                 self.send_header('Last-Modified',
                                  self.date_time_string(fs.st_mtime))
                 self.end_headers()
                 return f
             else:
+                fs = os.fstat(f.fileno())
                 self.send_response(HTTPStatus.PARTIAL_CONTENT)
                 self.send_header('Content-type', ctype)
-                fs = os.fstat(f.fileno())
                 self.send_header('Last-Modified',
                                  self.date_time_string(fs.st_mtime))
                 rstart, rend = self.headers['Range'].split('=')[-1].split('-')
@@ -187,73 +185,73 @@ class RangedHTTPRequestHandler(MinHTTPRequestHandler, SimpleHTTPRequestHandler):
             f.close()
             raise
 
-        def list_directory(self, path):
-            '''Helper to produce a directory listing (absent index.html).
-    
-            Return value is either a file object, or None (indicating an
-            error).  In either case, the headers are sent, making the
-            interface the same as for send_head().
-            '''
-            try:
-                list = os.listdir(path)
-            except OSError:
-                self.send_error(
-                    HTTPStatus.NOT_FOUND,
-                    'No permission to list directory')
-                return None
-            list.sort(key=lambda a: a.lower())
-            r = []
-            try:
-                displaypath = urllib.parse.unquote(self.path,
-                                                   errors='surrogatepass')
-            except UnicodeDecodeError:
-                displaypath = urllib.parse.unquote(path)
-            displaypath = html.escape(displaypath)
-            enc = sys.getfilesystemencoding()
-            title = 'Directory listing for %s' % displaypath
-            r.append('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" '
-                     '"http://www.w3.org/TR/html4/strict.dtd">')
-            r.append('<html>\n<head>')
-            r.append('<meta http-equiv="Content-Type" '
-                     'content="text/html; charset=%s">' % enc)
-            r.append('<title>%s</title>\n</head>' % title)
-            r.append('<body>\n<h1>%s</h1>' % title)
-            r.append('<hr>\n<ul>')
-            for name in list:
-                fullname = os.path.join(path, name)
-                displayname = linkname = name
-                # Append / for directories or @ for symbolic links
-                if os.path.isdir(fullname):
-                    displayname = name + '/'
-                    linkname = name + '/'
-                if os.path.islink(fullname):
-                    displayname = name + '@'
-                    # Note: a link to a directory displays with @ and links with /
-                r.append('<li><a href="%s">%s</a></li>'
-                        % (urllib.parse.quote(linkname,
-                                              errors='surrogatepass'),
-                           html.escape(displayname)))
-            r.append('</ul>\n<hr>\n</body>\n</html>\n')
-            encoded = '\n'.join(r).encode(enc, 'surrogateescape')
-            f = io.BytesIO()
-            f.write(encoded)
-            f.seek(0)
-            self.send_response(HTTPStatus.OK)
-            self.send_header('Content-type', 'text/html; charset=%s' % enc)
-            self.send_header('Content-Length', str(len(encoded)))
-            self.end_headers()
-            return f
+    def list_directory(self, path):
+        '''Helper to produce a directory listing (absent index.html).
 
-    def copyfile(self, source, output_file):
-        '''Same as super().copyfile, but send partial file if Range is in request headers.'''
+        Return value is either a file object, or None (indicating an
+        error).  In either case, the headers are sent, making the
+        interface the same as for send_head().
+        '''
+        try:
+            list = os.listdir(path)
+        except OSError:
+            self.send_error(
+                HTTPStatus.NOT_FOUND,
+                'No permission to list directory')
+            return None
+        list.sort(key=lambda a: a.lower())
+        r = []
+        try:
+            displaypath = urllib.parse.unquote(self.path,
+                                               errors='surrogatepass')
+        except UnicodeDecodeError:
+            displaypath = urllib.parse.unquote(path)
+        displaypath = html.escape(displaypath)
+        enc = sys.getfilesystemencoding()
+        title = 'Directory listing for %s' % displaypath
+        r.append('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" '
+                 '"http://www.w3.org/TR/html4/strict.dtd">')
+        r.append('<html>\n<head>')
+        r.append('<meta http-equiv="Content-Type" '
+                 'content="text/html; charset=%s">' % enc)
+        r.append('<title>%s</title>\n</head>' % title)
+        r.append('<body>\n<h1>%s</h1>' % title)
+        r.append('<hr>\n<ul>')
+        for name in list:
+            fullname = os.path.join(path, name)
+            displayname = linkname = name
+            # Append / for directories or @ for symbolic links
+            if os.path.isdir(fullname):
+                displayname = name + '/'
+                linkname = name + '/'
+            if os.path.islink(fullname):
+                displayname = name + '@'
+                # Note: a link to a directory displays with @ and links with /
+            r.append('<li><a href="%s">%s</a></li>'
+                    % (urllib.parse.quote(linkname,
+                                          errors='surrogatepass'),
+                       html.escape(displayname)))
+        r.append('</ul>\n<hr>\n</body>\n</html>\n')
+        encoded = '\n'.join(r).encode(enc, 'surrogateescape')
+        f = io.BytesIO()
+        f.write(encoded)
+        f.seek(0)
+        self.send_response(HTTPStatus.OK)
+        self.send_header('Content-type', 'text/html; charset=%s' % enc)
+        self.send_header('Content-Length', str(len(encoded)))
+        self.end_headers()
+        return f
+
+    def send_file(self, f):
+        '''Send content of a file object to response body.'''
         if 'Range' in self.headers:
             rstart, rend = self.headers['Range'].split('=')[-1].split('-')
             rstart = 0 if rstart == '' else int(rstart)
             rend = float('inf') if rend == '' else int(rend)
-            input_file = RangedFile(source, rstart, rend)
+            input_file = RangedFile(f, rstart, rend)
         else:
-            input_file = source
-        super().copyfile(input_file, output_file)
+            input_file = f
+        super().copyfile(input_file, self.outfile)
 
 class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
     '''A HTTP proxy request handler.'''
@@ -321,7 +319,7 @@ class ProxyHTTPRequestHandler(BaseHTTPRequestHandler):
         port = int(port)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((host, port))
-        self.send_response(200, 'Connection Established')
+        self.send_response(HTTPStatus.OK, 'Connection Established')
         self.end_headers()
         self.rfile.flush()
         self.wfile.flush()

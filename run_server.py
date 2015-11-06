@@ -16,9 +16,9 @@ def run_server(server_class, handler_class, port):
 
 if __name__ == '__main__':
     from servers import ThreadingHTTPServer, ForkingHTTPServer
-    from handlers import RangedHTTPRequestHandler, ProxyHTTPRequestHandler
+    from handlers import FileHTTPRequestHandler, ProxyHTTPRequestHandler
     port = 8000
-    handler_class = RangedHTTPRequestHandler
+    handler_class = FileHTTPRequestHandler
     if len(sys.argv) >= 2:
         port = int(sys.argv[1])
     if len(sys.argv) >= 3:
