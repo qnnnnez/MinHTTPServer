@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.5
 from http.server import SimpleHTTPRequestHandler
 import os
 from http import HTTPStatus
@@ -6,18 +6,17 @@ import urllib.parse
 import html
 import sys
 import io
-import posixpath
-from servers import ThreadingHTTPServer
-from minhttp import MinHTTPRequestHandler
+import importlib.machinery
 from rangedfile import RangedFile
+from filehttp import FileHTTPRequestHandler
+from filehttp import FileHTTPConfig, FileHTTPServer
 
 __version__ = '0.1'
 
-class FileHTTPRequestHandler(MinHTTPRequestHandler,
-                             SimpleHTTPRequestHandler):
+class PythonHTTPRequestHandler(FileHTTPRequestHandler):
     '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.'''
 
-    server_version = 'FileHTTP/' + __version__
+    server_version = 'PythonHTTP/' + __version__
     protocol_version = 'HTTP/1.1'
 
     def do_GET(self):
@@ -30,6 +29,12 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
             finally:
                 f.close()
                 self.end_body()
+
+    def do_POST(self):
+        '''Handle a POST request.'''
+        f = self.send_head()
+        if not f:
+            raise ValueError('Cannot POST to the file.')
 
     def send_head(self):
         '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.'''
@@ -46,7 +51,7 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
                 self.send_header('Location', new_url)
                 self.end_headers()
                 return None
-            for index in 'index.html', 'index.htm':
+            for index in 'index.html', 'index.htm', 'index.py':
                 index = os.path.join(path, index)
                 if os.path.exists(index):
                     path = index
@@ -62,6 +67,9 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
             f = open(path, 'rb')
         except OSError:
             self.send_error(HTTPStatus.NOT_FOUND, 'File not found')
+            return None
+        if ctype == 'text/x-python':
+            self.run_script(path)
             return None
         try:
             if 'Range' not in self.headers:
@@ -165,49 +173,30 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
             input_file = f
         super().copyfile(input_file, self.outfile)
 
-    def translate_path(self, path):
-        '''Same as SimpleHTTPServer.translate_path, buf self.server.content_dir is used instead of os.getcwd()'''
-        # abandon query parameters
-        path = path.split('?',1)[0]
-        path = path.split('#',1)[0]
-        # Don't forget explicit trailing slash when normalizing. Issue17324
-        trailing_slash = path.rstrip().endswith('/')
-        try:
-            path = urllib.parse.unquote(path, errors='surrogatepass')
-        except UnicodeDecodeError:
-            path = urllib.parse.unquote(path)
-        path = posixpath.normpath(path)
-        words = path.split('/')
-        words = filter(None, words)
-        path = self.server.content_dir
-        for word in words:
-            drive, word = os.path.splitdrive(word)
-            head, word = os.path.split(word)
-            if word in (os.curdir, os.pardir): continue
-            path = os.path.join(path, word)
-        if trailing_slash:
-            path += '/'
-        return path
+    def run_script(self, path):
+        Loader = importlib.machinery.SourceFileLoader
+        loader = Loader('mod', path)
+        mod = loader.load_module()
+        mod.handle(self)
 
-class FileHTTPConfig(object):
-    def setup(self, content_dir='.', allow_lsdir=True):
-        self.content_dir = content_dir
-        if not self.content_dir.endswith('/'):
-            self.content_dir += '/'
-        self.allow_lsdir = allow_lsdir
+    extensions_map = FileHTTPRequestHandler.extensions_map
+    extensions_map.update({'.py': 'text/x-python'})
 
-class FileHTTPServer(ThreadingHTTPServer, FileHTTPConfig):
+
+class PythonHTTPConfig(FileHTTPConfig):
+    pass
+
+class PythonHTTPServer(FileHTTPServer):
     pass
 
 def main():
     from sys import argv
-    if len(argv) == 2:
-        port = int(argv[1])
-    else:
-        port = 8000
-    server_address = ('', 8000)
-    httpd = FileHTTPServer(server_address, FileHTTPRequestHandler)
-    httpd.setup()
+    port = 8000
+    for arg in argv[1:]:
+        exec(arg)
+    server_address = ('', port)
+    httpd = PythonHTTPServer(server_address, PythonHTTPRequestHandler)
+    httpd.setup(content_dir='./content/')
     print('Serving HTTP on port {} ...'.format(port))
     try:
         httpd.serve_forever()

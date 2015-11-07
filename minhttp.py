@@ -30,7 +30,6 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         '''
         self.using_gzip = False
         self.using_chunked = False
-        self.outfile = self.wfile
 
         if 'Accept-Encoding' in self.headers:
             encodings = self.headers['Accept-Encoding'].split(',')
@@ -69,6 +68,7 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def start_body(self):
         '''Create self.outfile, which replaces self.wfile'''
+        self.outfile = self.wfile
         if self.using_chunked:
             self.outfile = self.chunked_file = ChunkedWriter(
                     self.outfile, -1)
@@ -82,7 +82,6 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def end_body(self):
         '''Do some clean up works.'''
-        self.outfile.flush()
         if self.gzip_file:
             self.gzip_file.flush()
             self.gzip_file.close()
