@@ -89,4 +89,42 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             self.chunked_file.end_file()
         self.gzip_file = self.chunked_file = None
 
+    def send_error(self, code, message=None, explain=None):
+        """Send and log an error reply.
+        Arguments are
+        * code:    an HTTP error code
+                   3 digits
+        * message: a simple optional 1 line reason phrase.
+                   *( HTAB / SP / VCHAR / %x80-FF )
+                   defaults to short entry matching the response code
+        * explain: a detailed message defaults to the long entry
+                   matching the response code.
+        This sends an error response (so it must be called before any
+        output has been generated), logs the error, and finally sends
+        a piece of HTML explaining the error to the user.
+        """
+        from http.server import _quote_html
+        try:
+            shortmsg, longmsg = self.responses[code]
+        except KeyError:
+            shortmsg, longmsg = '???', '???'
+        if message is None:
+            message = shortmsg
+        if explain is None:
+            explain = longmsg
+        self.log_error("code %d, message %s", code, message)
+        # using _quote_html to prevent Cross Site Scripting attacks (see bug #1100201)
+        content = (self.error_message_format %
+                   {'code': code, 'message': _quote_html(message), 'explain': _quote_html(explain)})
+        body = content.encode('UTF-8', 'replace')
+        self.send_response(code, message)
+        self.send_header("Content-Type", self.error_content_type)
+        self.send_header('Connection', 'close')
+        self.send_header('Content-Length', int(len(body)))
+        self.just_end_headers()
+        if (self.command != 'HEAD' and
+                code >= 200 and
+                code not in (
+                    HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED)):
+            self.wfile.write(body)
 
