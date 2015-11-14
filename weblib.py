@@ -3,10 +3,10 @@ import json
 
 def get_query(handler):
     query = urllib.parse.urlparse(handler.path).query
-    query = urllib.parse.unquote(query)
     query = query.split('&')
     result = {}
     for item in query:
+        item = urllib.parse.unquote(item)
         items = item.split('=')
         if len(items) != 2:
             continue
