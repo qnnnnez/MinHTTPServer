@@ -1,4 +1,4 @@
-﻿import gzip
+import gzip
 from http.server import BaseHTTPRequestHandler
 from http import HTTPStatus
 from chunkedfile import ChunkedWriter
@@ -60,7 +60,6 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             # transfer length unknown.
             self.send_header('Transfer-Encoding', 'chunked')
             self.using_chunked = True
-            print('using chunked encoding.')
 
         super().end_headers()
         delattr(self, '_content_length')
@@ -78,7 +77,6 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.using_chunked:
             self.outfile = self.chunked_file = ChunkedWriter(
                     self.outfile, -1)
-            print('using chunked writer.')
         else:
             self.chunked_file = None
         if self.using_gzip:
