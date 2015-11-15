@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3.5
 from http.server import SimpleHTTPRequestHandler
 import os
 from http import HTTPStatus

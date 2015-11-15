@@ -173,19 +173,41 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
         super().copyfile(input_file, self.outfile)
 
     def run_script(self, path):
-        Loader = importlib.machinery.SourceFileLoader
-        loader = Loader('mod', path)
-        mod = loader.load_module()
-        mod.handle(self)
+        if self.server.module_cache_pool:
+            module = self.server.module_cache_pool.update_module(path)
+        else:
+            loader = importlib.machinery.SourceFileLoader('web.mod', path)
+            module = loader.load_module()
+        module.handle(self)
 
     extensions_map = FileHTTPRequestHandler.extensions_map
     extensions_map.update({'.py': 'text/x-python'})
 
-
-    pass
-
 class PythonHTTPServer(FileHTTPServer):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.module_cache_pool = None
+
+    def enable_module_cache(self):
+        self.module_cache_pool = ModuleCachePool()
+
+    def disable_module_cache(self):
+        self.module_cache_pool = None
+
+class ModuleCachePool(object):
+    def __init__(self):
+        self.pool = {}
+
+    def update_module(self, modulepath):
+        mtime = os.stat(modulepath).st_mtime
+        if modulepath in self.pool:
+            old_mtime, module = self.pool[modulepath]
+            if old_mtime == mtime:
+                return module
+        loader = importlib.machinery.SourceFileLoader('web.mod', modulepath)
+        module = loader.load_module()
+        self.pool[modulepath] = mtime, module
+        return module
 
 def main():
     from sys import argv
@@ -195,6 +217,7 @@ def main():
     server_address = ('', port)
     with run_server(server_address, PythonHTTPServer, PythonHTTPRequestHandler) as server:
         server.content_dir = './content/'
+        server.enable_module_cache()
 
 if __name__ == '__main__':
     main()
