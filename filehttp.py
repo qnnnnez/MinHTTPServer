@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from http.server import SimpleHTTPRequestHandler
 import os
 from http import HTTPStatus
@@ -188,12 +188,6 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
         if trailing_slash:
             path += '/'
         return path
-
-    def setup(self, content_dir='.', allow_lsdir=True):
-        self.content_dir = content_dir
-        if not self.content_dir.endswith('/'):
-            self.content_dir += '/'
-        self.allow_lsdir = allow_lsdir
 
 class FileHTTPServer(MinHTTPServer):
     def __init__(self, *args, **kwargs):

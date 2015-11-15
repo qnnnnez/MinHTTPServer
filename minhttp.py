@@ -1,4 +1,4 @@
-import gzip
+﻿import gzip
 from http.server import BaseHTTPRequestHandler
 from http import HTTPStatus
 from chunkedfile import ChunkedWriter
