@@ -8,8 +8,7 @@ import sys
 import io
 import importlib.machinery
 from rangedfile import RangedFile
-from filehttp import FileHTTPRequestHandler
-from filehttp import FileHTTPConfig, FileHTTPServer
+from filehttp import FileHTTPRequestHandler, FileHTTPServer, run_server
 
 __version__ = '0.1'
 
@@ -183,7 +182,6 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
     extensions_map.update({'.py': 'text/x-python'})
 
 
-class PythonHTTPConfig(FileHTTPConfig):
     pass
 
 class PythonHTTPServer(FileHTTPServer):
@@ -195,15 +193,8 @@ def main():
     for arg in argv[1:]:
         exec(arg)
     server_address = ('', port)
-    httpd = PythonHTTPServer(server_address, PythonHTTPRequestHandler)
-    httpd.setup(content_dir='./content/')
-    print('Serving HTTP on port {} ...'.format(port))
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print('Keyboard interrupt received, exiting.')
-        httpd.shutdown()
-
+    with run_server(server_address, PythonHTTPServer, PythonHTTPRequestHandler) as server:
+        server.content_dir = './content/'
 
 if __name__ == '__main__':
     main()

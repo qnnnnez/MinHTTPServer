@@ -2,6 +2,7 @@ import gzip
 from http.server import BaseHTTPRequestHandler
 from http import HTTPStatus
 from chunkedfile import ChunkedWriter
+from servers import ThreadingHTTPServer
 
 __version__ = '0.1'
 
@@ -28,15 +29,19 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         '''Send extra HTTP headers.
         If you want to send response body as well, you are supposed to use self.start_body() and self.end_body().
         '''
-        self.using_gzip = False
-        self.using_chunked = False
+        if not hasattr(self, 'using_gzip'):
+            self.using_gzip = self.server.using_gzip
+        if not hasattr(self, 'using_chunked'):
+            self.using_chunked = False
 
-        if 'Accept-Encoding' in self.headers:
+        if 'Accept-Encoding' in self.headers and self.using_gzip:
             encodings = self.headers['Accept-Encoding'].split(',')
             encodings = [encoding.strip() for encoding in encodings]
             if 'gzip' in encodings:
                 self.send_header('Content-Encoding', 'gzip')
                 self.using_gzip = True
+                if not hasattr(self, 'compress_level'):
+                    self.compress_level = self.server.compress_level
             elif 'deflate' in encodings:
                 # unusual
                 pass
@@ -55,6 +60,7 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
             # transfer length unknown.
             self.send_header('Transfer-Encoding', 'chunked')
             self.using_chunked = True
+            print('using chunked encoding.')
 
         super().end_headers()
         delattr(self, '_content_length')
@@ -63,8 +69,8 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         '''Just end headers, doing nothing else.'''
         if self._content_length:
             super().send_header('Content-Length', self._content_length)
-        super().end_headers()
         delattr(self, '_content_length')
+        super().end_headers()
 
     def start_body(self):
         '''Create self.outfile, which replaces self.wfile'''
@@ -72,11 +78,13 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.using_chunked:
             self.outfile = self.chunked_file = ChunkedWriter(
                     self.outfile, -1)
+            print('using chunked writer.')
         else:
             self.chunked_file = None
         if self.using_gzip:
             self.outfile = self.gzip_file = gzip.GzipFile(
-                    fileobj=self.outfile, mode='wb')
+                    fileobj=self.outfile, mode='wb',
+                    compresslevel=self.compress_level)
         else:
             self.gzip_file = None
 
@@ -88,6 +96,14 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.chunked_file:
             self.chunked_file.end_file()
         self.gzip_file = self.chunked_file = None
+        if hasattr(self, 'using_gzip'):
+            delattr(self, 'using_gzip')
+        if hasattr(self, 'using_chunked'):
+            delattr(self, 'using_chunked')
+        if hasattr(self, 'compress_level'):
+            delattr(self, 'compress_level')
+        if hasattr(self, 'outfile'):
+            delattr(self, 'outfile')
 
     def send_error(self, code, message=None, explain=None):
         """Send and log an error reply.
@@ -127,4 +143,10 @@ class MinHTTPRequestHandler(BaseHTTPRequestHandler):
                 code not in (
                     HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED)):
             self.wfile.write(body)
+
+class MinHTTPServer(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.using_gzip = False
+        self.compress_level = 9
 

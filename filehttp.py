@@ -7,8 +7,8 @@ import html
 import sys
 import io
 import posixpath
-from servers import ThreadingHTTPServer
-from minhttp import MinHTTPRequestHandler
+from servers import run_server
+from minhttp import MinHTTPRequestHandler, MinHTTPServer
 from rangedfile import RangedFile
 
 __version__ = '0.1'
@@ -26,7 +26,7 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
         if f:
             self.start_body()
             try:
-                self.send_file(f)
+                self.send_fileobj(f)
             finally:
                 f.close()
                 self.end_body()
@@ -154,7 +154,7 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
         self.end_headers()
         return f
 
-    def send_file(self, f):
+    def send_fileobj(self, f):
         '''Send content of a file object to response body.'''
         if 'Range' in self.headers:
             rstart, rend = self.headers['Range'].split('=')[-1].split('-')
@@ -189,32 +189,35 @@ class FileHTTPRequestHandler(MinHTTPRequestHandler,
             path += '/'
         return path
 
-class FileHTTPConfig(object):
     def setup(self, content_dir='.', allow_lsdir=True):
         self.content_dir = content_dir
         if not self.content_dir.endswith('/'):
             self.content_dir += '/'
         self.allow_lsdir = allow_lsdir
 
-class FileHTTPServer(ThreadingHTTPServer, FileHTTPConfig):
-    pass
+class FileHTTPServer(MinHTTPServer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.content_dir = './'
+        self.allow_lsdir = True
+
+    @property
+    def content_dir(self):
+        return self._content_dir
+    @content_dir.setter
+    def content_dir(self, value):
+        if not value.endswith('/'):
+            value += '/'
+        self._content_dir = value
 
 def main():
     from sys import argv
-    if len(argv) == 2:
-        port = int(argv[1])
-    else:
-        port = 8000
-    server_address = ('', 8000)
-    httpd = FileHTTPServer(server_address, FileHTTPRequestHandler)
-    httpd.setup()
-    print('Serving HTTP on port {} ...'.format(port))
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print('Keyboard interrupt received, exiting.')
-        httpd.shutdown()
-
+    port = 8000
+    for arg in argv[1:]:
+        exec(arg)
+    server_address = ('', port)
+    with run_server(server_address, FileHTTPServer, FileHTTPRequestHandler) as server:
+        pass
 
 if __name__ == '__main__':
     main()
