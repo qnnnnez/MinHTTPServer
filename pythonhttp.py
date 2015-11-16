@@ -204,7 +204,7 @@ class ModuleCachePool(object):
             old_mtime, module = self.pool[modulepath]
             if old_mtime == mtime:
                 return module
-        loader = importlib.machinery.SourceFileLoader('web.mod', modulepath)
+        loader = importlib.machinery.SourceFileLoader(modulepath, modulepath)
         module = loader.load_module()
         self.pool[modulepath] = mtime, module
         return module
