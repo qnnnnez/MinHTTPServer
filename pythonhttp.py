@@ -34,6 +34,12 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
         f = self.send_head()
         if not f:
             raise ValueError('Cannot POST to the file.')
+        try:
+            self.start_body()
+            self.send_file(f)
+        finally:
+            f.close()
+            self.end_body()
 
     def send_head(self):
         '''Same as super().send_header, but sending status code 206 and HTTP response header Content-Length.'''
@@ -42,6 +48,9 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
         if os.path.isdir(path):
             parts = urllib.parse.urlsplit(self.path)
             if not parts.path.endswith('/'):
+                if not self.server.allow_lsdir:
+                    self.send_error(HTTPStatus.NOT_FOUND, 'File not found')
+                    return None
                 # redirect browser - doing basically what apache does
                 self.send_response(HTTPStatus.MOVED_PERMANENTLY)
                 new_parts = (parts[0], parts[1], parts[2] + '/',
