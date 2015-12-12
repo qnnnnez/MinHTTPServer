@@ -12,6 +12,22 @@ from filehttp import FileHTTPRequestHandler, FileHTTPServer, run_server
 
 __version__ = '0.1'
 
+def get_query(path):
+    import json
+    query = urllib.parse.urlparse(path).query
+    query = query.split('&')
+    result = {}
+    for item in query:
+        item = urllib.parse.unquote(item)
+        items = item.split('=')
+        if len(items) != 2:
+            continue
+        key, value = items
+        key = json.loads('"{}"'.format(key))
+        value = json.loads('"{}"'.format(value))
+        result[key] = value
+    return result
+
 class PythonHTTPRequestHandler(FileHTTPRequestHandler):
     '''Extended SimpleHTTPRequestHandler with HTTP request header Range supported.'''
 
@@ -87,6 +103,8 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
                         self.send_response(HTTPStatus.NOT_MODIFIED)
                         self.end_headers()
                         f.close()
+                        self.start_body()
+                        self.end_body()
                         return None
                 self.send_response(HTTPStatus.OK)
                 self.send_header('Content-type', ctype)
@@ -187,8 +205,8 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
         else:
             loader = importlib.machinery.SourceFileLoader('web.mod', path)
             module = loader.load_module()
+        self.query = get_query(self.path)
         module.handle(self)
-
     extensions_map = FileHTTPRequestHandler.extensions_map
     extensions_map.update({'.py': 'text/x-python'})
 
