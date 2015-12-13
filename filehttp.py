@@ -204,15 +204,16 @@ class FileHTTPServer(MinHTTPServer):
             value += '/'
         self._content_dir = value
 
-def main():
-    from sys import argv
-    port = 8000
-    for arg in argv[1:]:
-        exec(arg)
+def main(args):
+    if len(args) == 1:
+        port = int(args[0])
+    else:
+        port = 8000
     server_address = ('', port)
     with run_server(server_address, FileHTTPServer, FileHTTPRequestHandler) as server:
         pass
 
 if __name__ == '__main__':
-    main()
+    from sys import argv
+    main(argv[1:])
     

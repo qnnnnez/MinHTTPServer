@@ -74,6 +74,8 @@ class PythonHTTPRequestHandler(FileHTTPRequestHandler):
                 new_url = urllib.parse.urlunsplit(new_parts)
                 self.send_header('Location', new_url)
                 self.end_headers()
+                self.start_body()
+                self.end_body()
                 return None
             for index in 'index.html', 'index.htm', 'index.py':
                 index = os.path.join(path, index)
@@ -236,16 +238,17 @@ class ModuleCachePool(object):
         self.pool[modulepath] = mtime, module
         return module
 
-def main():
-    from sys import argv
-    port = 8000
-    for arg in argv[1:]:
-        exec(arg)
+def main(args):
+    if len(args) == 1:
+        port = int(args[0])
+    else:
+        port = 8000
     server_address = ('', port)
     with run_server(server_address, PythonHTTPServer, PythonHTTPRequestHandler) as server:
         server.content_dir = './content/'
         server.enable_module_cache()
 
 if __name__ == '__main__':
-    main()
+    from sys import argv
+    main(argv[1:])
     
